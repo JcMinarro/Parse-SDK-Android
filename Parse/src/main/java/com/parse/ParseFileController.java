@@ -60,7 +60,7 @@ import bolts.Task;
     if (state.url() == null) {
       return null;
     }
-    return new File(cachePath, ParseDigestUtils.md5(state.url()));
+    return new File(cachePath, state.url()+".tmp");
   }
 
   public boolean isDataAvailable(ParseFile.State state) {
@@ -156,16 +156,25 @@ import bolts.Task;
         // this incomplete cacheFile
         final File tempFile = getTempFile(state);
 
-        // network
-        final ParseAWSRequest request =
-            new ParseAWSRequest(ParseRequest.Method.GET, state.url(), tempFile);
+        return Task.call(new Callable<Void>() {
+          @Override
+          public Void call() throws Exception {
+            // If the last download is interrupted, there may be incomplete temp file in disk. So
+            // we need to clear it first.
+            ParseFileUtils.deleteQuietly(tempFile);
+            return null;
+          }
+        }).continueWithTask(new Continuation<Void, Task<Void>>() {
+          @Override
+          public Task<Void> then(Task<Void> task) throws Exception {
+            // network
+            final ParseAWSRequest request =
+                new ParseAWSRequest(ParseRequest.Method.GET, state.url(), tempFile);
 
-        // TODO(grantland): Stream response directly to file t5042019
-        return request.executeAsync(
-            awsClient(),
-            null,
-            downloadProgressCallback,
-            cancellationToken).continueWithTask(new Continuation<Void, Task<File>>() {
+            return request.executeAsync(
+                awsClient(), null, downloadProgressCallback, cancellationToken);
+          }
+        }).continueWithTask(new Continuation<Void, Task<File>>() {
           @Override
           public Task<File> then(Task<Void> task) throws Exception {
             // If the top-level task was cancelled, don't actually set the data -- just move on.
